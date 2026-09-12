@@ -14,6 +14,32 @@ It works with conformant Kubernetes clusters. The cluster needs the Metrics API 
 - Confirmation-gated rollout restarts for Deployments, StatefulSets, and DaemonSets; controller-managed pod restart.
 - Local application login with `read` and `write` roles, plus Kubernetes RBAC restrictions.
 
+## How it works
+
+```mermaid
+flowchart LR
+    U[Operator browser] -->|HTTPS or port-forward| UI[Cluster Operations UI]
+    UI -->|Read, logs, restart request| API[Dashboard API]
+    API -->|ServiceAccount token + RBAC| K8S[Kubernetes API]
+    K8S --> R[Namespaces, nodes, workloads, pods, events and logs]
+    K8S --> M[Metrics API\noptional CPU and memory]
+    R --> API
+    M --> API
+    API --> UI
+```
+
+The dashboard is deployed inside the target cluster. It reads live Kubernetes state at request time; it does not copy workload data into an external database.
+
+## Why this dashboard is different
+
+| This dashboard | Typical monitoring dashboard |
+| --- | --- |
+| Uses the Kubernetes API and `kubectl` for live operational state | Commonly relies on a metrics database and dashboards built from historical telemetry |
+| Works without Prometheus for core workload, Pod, event, log, and restart operations | Usually needs Prometheus or another monitoring backend before useful data is available |
+| Includes safe, confirmation-gated restart actions and per-container log download | Often provides observation only, with operations performed separately in a terminal |
+| Has application `read`/`write` roles plus Kubernetes RBAC namespace restrictions | Frequently uses one broadly privileged operator account |
+| Has no exec shell, Secret viewer, YAML editor, or arbitrary delete capability | Full Kubernetes consoles can expose a much wider administrative surface |
+
 ## Security model
 
 The dashboard is intentionally not an admin console: it has no shell/exec, YAML editor, secret access, or arbitrary deletion capability. Its ServiceAccount gets cluster-wide **read-only** access to node and namespace metadata. Workload reads and restart actions are granted only to explicitly selected namespaces unless `rbac.clusterWideActions` is enabled.
