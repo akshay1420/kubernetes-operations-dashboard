@@ -50,6 +50,8 @@ spec:
               value: {{ .Values.realtime.pendingPodWarningSeconds | quote }}
             - name: DASHBOARD_AUTH_REQUIRED
               value: {{ ternary "true" "false" .Values.auth.enabled | quote }}
+            - name: DASHBOARD_SCALE_ENABLED
+              value: {{ ternary "true" "false" .Values.actions.scale.enabled | quote }}
             {{- if .Values.auth.enabled }}
             - name: DASHBOARD_SESSION_SECRET
               valueFrom: { secretKeyRef: { name: {{ include "kubernetes-operations-dashboard.authSecretName" . }}, key: session-secret } }

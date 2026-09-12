@@ -3,9 +3,9 @@
   const me=await r.json(),identity=document.querySelector('#identity');identity.textContent=`${me.username} · ${me.role}`;
   const clock=document.createElement('span');clock.style.cssText='margin-right:12px;color:#9ec7f1;font-size:12px';identity.before(clock);
   try{const t=await fetch('/api/time').then(x=>x.json()),start=Date.now(),format=()=>clock.textContent=`Server time: ${new Date(t.epoch*1000+Date.now()-start).toLocaleString()} ${t.timezone}`;format();setInterval(format,1000)}catch(e){clock.textContent='Server time unavailable'}
-  if(me.role==='read')document.head.insertAdjacentHTML('beforeend','<style>.restart-workload,.restart-pod{display:none!important}</style>');
+  if(me.role==='read')document.head.insertAdjacentHTML('beforeend','<style>.restart-workload,.restart-pod,.scale-workload{display:none!important}</style>');
   document.querySelector('#logout').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.assign('/login.html')};
-  try{const c=await fetch('/api/config').then(x=>x.json());setInterval(()=>{if(!document.hidden)loadNamespace()},c.refreshSeconds*1000)}catch(e){}
+  try{const c=await fetch('/api/config').then(x=>x.json());if(!c.scaleEnabled)document.head.insertAdjacentHTML('beforeend','<style>.scale-workload{display:none!important}</style>');setInterval(()=>{if(!document.hidden)loadNamespace()},c.refreshSeconds*1000)}catch(e){}
   let allLogs='';const dialog=document.querySelector('#logsDialog'),container=document.querySelector('#logContainer'),since=document.querySelector('#logSince'),search=document.querySelector('#logSearch'),output=document.querySelector('#logs');
   function render(){const q=search.value.trim().toLowerCase();output.textContent=!q?allLogs:allLogs.split('\n').filter(x=>x.toLowerCase().includes(q)).join('\n')||'No matching log lines.'}
   search.oninput=render;
@@ -23,4 +23,40 @@
   function expandStatusFilter(){const status=document.querySelector('#podStatusFilter');if(!status||status.dataset.expanded)return;status.dataset.expanded='true';status.innerHTML='<option value="all">All pods</option><option value="running">Running (all)</option><option value="running-ready">Running and ready</option><option value="notready">Running, not ready</option><option value="pending">Pending</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="unknown">Unknown</option><option value="problem">Crash / image error</option>';status.value=podFilter.status;status.onchange=()=>{podFilter.status=status.value;applyPodFilter(document.querySelector('#pods table'))}}
   const baseEnhance=enhance;enhance=()=>{baseEnhance();const table=document.querySelector('#pods table');if(table){installPodFilters(table);expandStatusFilter();applyPodFilter(table)}};
   setInterval(enhance,1000);document.head.insertAdjacentHTML('beforeend','<style>#pods [data-container-count]{color:#9ec7f1;font-size:12px;white-space:nowrap}#pods th[data-sortable]{color:#5ce0c6;user-select:none}.pod-filters{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:-2px 0 16px;padding:12px;background:#10213a;border:1px solid #2a4b6f;border-radius:9px}.pod-filters label{min-width:190px;color:#b9cde7;font-size:12px}.pod-filters input,.pod-filters select{margin-top:5px}.pod-filters span{color:#9ec7f1;font-size:12px;padding:9px 0}#pods tr.pod-healthy td,#pods tr.pod-pending td,#pods tr.pod-degraded td,#pods tr.pod-critical td,#pods tr.pod-completed td{background:transparent!important}#pods tr.pod-healthy td:first-child{box-shadow:inset 4px 0 #43dbc1}#pods tr.pod-pending td:first-child{box-shadow:inset 4px 0 #ffcd70}#pods tr.pod-degraded td:first-child{box-shadow:inset 4px 0 #ffb84d}#pods tr.pod-critical td:first-child{box-shadow:inset 4px 0 #ff7b91}#pods tr.pod-healthy td:nth-child(2),#pods tr.pod-healthy td:nth-child(3){color:#43dbc1;font-weight:650}#pods tr.pod-pending td:nth-child(2),#pods tr.pod-pending td:nth-child(3){color:#ffcd70;font-weight:650}#pods tr.pod-degraded td:nth-child(2),#pods tr.pod-degraded td:nth-child(3){color:#ffb84d;font-weight:650}#pods tr.pod-critical td:nth-child(2),#pods tr.pod-critical td:nth-child(3){color:#ff7b91;font-weight:650}</style>');
+})();
+
+/* Event filtering runs in the browser against the live Kubernetes Event list. */
+(()=>{
+  const state={text:'',type:'all',scope:'all'};
+  const problem=/warning|fail|error|backoff|crash|unhealthy|unready|unschedul|evict|oom|pull|kill|deadline|forbidden|denied/i;
+  function apply(table){
+    let count=0;
+    Array.prototype.forEach.call(table.tBodies[0].rows,function(row){
+      const type=(row.cells[1]&&row.cells[1].textContent||'').trim();
+      const reason=(row.cells[2]&&row.cells[2].textContent||'').trim();
+      const message=(row.cells[3]&&row.cells[3].textContent||'').trim();
+      const combined=(type+' '+reason+' '+message).toLowerCase();
+      const typeMatch=state.type==='all'||type.toLowerCase()===state.type;
+      const scopeMatch=state.scope==='all'||(state.scope==='problem'&&problem.test(type+' '+reason+' '+message))||(state.scope==='scheduling'&&/schedul|node|taint|affinity|insufficient/i.test(reason+' '+message));
+      const textMatch=!state.text||combined.indexOf(state.text)>=0;
+      row.hidden=!(typeMatch&&scopeMatch&&textMatch);
+      if(!row.hidden)count++;
+    });
+    const label=document.querySelector('#eventFilterCount');if(label)label.textContent=count+' matching events';
+  }
+  function install(){
+    const panel=document.querySelector('#events'),table=panel&&panel.querySelector('table');
+    if(!table||panel.querySelector('#eventFilters')||!table.tBodies.length)return;
+    const types=[];Array.prototype.forEach.call(table.tBodies[0].rows,function(row){const value=(row.cells[1]&&row.cells[1].textContent||'').trim().toLowerCase();if(value&&types.indexOf(value)<0)types.push(value)});
+    const tools=document.createElement('div');tools.id='eventFilters';tools.className='event-filters';
+    tools.innerHTML='<label>Search events<input id="eventTextFilter" placeholder="Reason, message, Pod, error…"></label><label>Event type<select id="eventTypeFilter"><option value="all">All event types</option>'+types.map(function(type){return '<option value="'+type+'">'+type.charAt(0).toUpperCase()+type.slice(1)+'</option>'}).join('')+'</select></label><label>Focus<select id="eventScopeFilter"><option value="all">All events</option><option value="problem">Problems / errors</option><option value="scheduling">Scheduling issues</option></select></label><span id="eventFilterCount"></span>';
+    panel.querySelector('h2').after(tools);
+    const text=tools.querySelector('#eventTextFilter'),type=tools.querySelector('#eventTypeFilter'),scope=tools.querySelector('#eventScopeFilter');
+    text.oninput=function(){state.text=text.value.trim().toLowerCase();apply(table)};
+    type.onchange=function(){state.type=type.value;apply(table)};
+    scope.onchange=function(){state.scope=scope.value;apply(table)};
+    apply(table);
+  }
+  setInterval(install,700);
+  document.head.insertAdjacentHTML('beforeend','<style>.event-filters{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:-2px 0 16px;padding:12px;background:#10213a;border:1px solid #2a4b6f;border-radius:9px}.event-filters label{min-width:200px;color:#b9cde7;font-size:12px}.event-filters input,.event-filters select{margin-top:5px}.event-filters span{color:#9ec7f1;font-size:12px;padding:9px 0}</style>');
 })();

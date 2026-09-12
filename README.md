@@ -10,8 +10,9 @@ It works with conformant Kubernetes clusters. The cluster needs the Metrics API 
 - Sortable pods by name, phase, containers, age, CPU, memory, and restart count.
 - Per-container logs, previous-container logs, time-range selection, and in-browser log search.
 - Download the selected container log view as a timestamped `.log` file.
+- Workload application context: selector-matched Pods, HPA configuration, Services, ready EndpointSlice targets, and Ingress routes.
 - Pod, workload, and node diagnostics, plus namespace quota/HPA/CronJob, PVC, Service, Ingress, and EndpointSlice views.
-- Confirmation-gated rollout restarts for Deployments, StatefulSets, and DaemonSets; controller-managed pod restart.
+- Confirmation-gated rollout restarts for Deployments, StatefulSets, and DaemonSets; controller-managed pod restart; optional replica scaling for Deployments and StatefulSets.
 - Local application login with `read` and `write` roles, plus Kubernetes RBAC restrictions.
 
 ## How it works
@@ -49,8 +50,8 @@ For production, put an internal HTTPS Ingress with your SSO/OIDC proxy in front 
 ## Build
 
 ```bash
-docker build --pull --no-cache --build-arg KUBECTL_VERSION=v1.37.0 -t ghcr.io/<your-org>/kubernetes-operations-dashboard:0.1.29 .
-docker push ghcr.io/<your-org>/kubernetes-operations-dashboard:0.1.29
+docker build --pull --no-cache --build-arg KUBECTL_VERSION=v1.37.0 -t ghcr.io/<your-org>/kubernetes-operations-dashboard:0.1.30 .
+docker push ghcr.io/<your-org>/kubernetes-operations-dashboard:0.1.30
 ```
 
 The image includes the `kubectl` version declared in the Dockerfile. Build with a client version compatible with the target cluster:

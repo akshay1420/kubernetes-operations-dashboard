@@ -10,7 +10,7 @@ Create a private values file outside source control:
 # dashboard-values.yaml
 image:
   repository: ghcr.io/<your-org>/kubernetes-operations-dashboard
-  tag: "0.1.29"
+  tag: "0.1.30"
 
 # For private registries only.
 imagePullSecrets: []
@@ -20,6 +20,10 @@ rbac:
   allowedNamespaces:
     - application-a
     - application-b
+
+actions:
+  scale:
+    enabled: true # disabled by default
 
 auth:
   enabled: true
@@ -56,6 +60,8 @@ Do not commit `dashboard-values.yaml`. Use a secret manager, encrypted values me
 ## Access modes
 
 `read` login users can view data and logs. `write` login users can also use the restart actions. The backend enforces this role check; hiding a button is not the authorization mechanism.
+
+Replica scaling is additionally disabled by default. Enable `actions.scale.enabled` only for trusted write operators. Kubernetes RBAC can scope the dashboard ServiceAccount to selected namespaces and resource types, but it cannot distinguish a restart patch from a replica patch on the same workload. The Helm feature gate prevents this dashboard from exposing the scale endpoint.
 
 Kubernetes RBAC is a separate enforcement layer. With the default `clusterWideActions: false`, the ServiceAccount can take operational actions only in `rbac.allowedNamespaces`. Leave the list empty until you have chosen the namespaces deliberately.
 
