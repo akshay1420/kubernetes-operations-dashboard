@@ -1,6 +1,6 @@
 # Kubernetes Operations Dashboard Helm chart
 
-Install this chart once in a dedicated namespace. It can observe the whole cluster, while workload access and restart actions remain restricted to the namespaces you explicitly configure.
+Install this chart once in a dedicated namespace. It can observe the whole cluster, while workload access and restart actions remain restricted to the namespaces you explicitly configure. Application-map diagnostics and the Capacity & limits CSV export are read-only and use the same namespace RBAC. Live container usage requires Metrics Server.
 
 ## Quick start
 
@@ -23,6 +23,12 @@ rbac:
 
 actions:
   scale:
+    enabled: true # disabled by default
+  cronJobSuspend:
+    enabled: true # disabled by default
+  cronJobEdit:
+    enabled: true # disabled by default
+  hpaEdit:
     enabled: true # disabled by default
 
 auth:
@@ -62,6 +68,8 @@ Do not commit `dashboard-values.yaml`. Use a secret manager, encrypted values me
 `read` login users can view data and logs. `write` login users can also use the restart actions. The backend enforces this role check; hiding a button is not the authorization mechanism.
 
 Replica scaling is additionally disabled by default. Enable `actions.scale.enabled` only for trusted write operators. Kubernetes RBAC can scope the dashboard ServiceAccount to selected namespaces and resource types, but it cannot distinguish a restart patch from a replica patch on the same workload. The Helm feature gate prevents this dashboard from exposing the scale endpoint.
+
+CronJob suspend/resume is also disabled by default. Enable `actions.cronJobSuspend.enabled` only when write operators should be able to pause or resume future CronJob executions. It does not cancel Jobs that are already running. Enable `actions.cronJobEdit.enabled` to allow changing only a CronJob schedule, and `actions.hpaEdit.enabled` to allow changing only an HPA minimum/maximum replica range. Both actions require an in-application confirmation and Kubernetes RBAC `patch` permission in the selected namespace.
 
 Kubernetes RBAC is a separate enforcement layer. With the default `clusterWideActions: false`, the ServiceAccount can take operational actions only in `rbac.allowedNamespaces`. Leave the list empty until you have chosen the namespaces deliberately.
 

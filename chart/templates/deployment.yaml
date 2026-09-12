@@ -52,6 +52,12 @@ spec:
               value: {{ ternary "true" "false" .Values.auth.enabled | quote }}
             - name: DASHBOARD_SCALE_ENABLED
               value: {{ ternary "true" "false" .Values.actions.scale.enabled | quote }}
+            - name: DASHBOARD_CRONJOB_SUSPEND_ENABLED
+              value: {{ ternary "true" "false" .Values.actions.cronJobSuspend.enabled | quote }}
+            - name: DASHBOARD_CRONJOB_EDIT_ENABLED
+              value: {{ ternary "true" "false" .Values.actions.cronJobEdit.enabled | quote }}
+            - name: DASHBOARD_HPA_EDIT_ENABLED
+              value: {{ ternary "true" "false" .Values.actions.hpaEdit.enabled | quote }}
             {{- if .Values.auth.enabled }}
             - name: DASHBOARD_SESSION_SECRET
               valueFrom: { secretKeyRef: { name: {{ include "kubernetes-operations-dashboard.authSecretName" . }}, key: session-secret } }

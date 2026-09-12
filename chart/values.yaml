@@ -6,7 +6,7 @@ fullnameOverride: ""
 image:
   # Replace with your own registry/repository before installing.
   repository: ghcr.io/your-github-org/kubernetes-operations-dashboard
-  tag: "0.1.32"
+  tag: "0.1.39"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -43,6 +43,12 @@ rbac:
 # ServiceAccount RBAC bindings above. Scaling is disabled unless explicitly enabled.
 actions:
   scale:
+    enabled: false
+  cronJobSuspend:
+    enabled: false
+  cronJobEdit:
+    enabled: false
+  hpaEdit:
     enabled: false
 
 service:
