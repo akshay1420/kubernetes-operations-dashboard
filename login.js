@@ -1,0 +1,1 @@
+document.querySelector('#login').onsubmit=async e=>{e.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.value,password:password.value})}),j=await r.json();if(r.ok)location.assign('/');else document.querySelector('#error').textContent=j.error||'Sign-in failed'};

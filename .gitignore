@@ -1,0 +1,19 @@
+# Environment-specific deployment values and credentials
+*-values.local.yaml
+*-values.private.yaml
+prod-values.yaml
+secrets*.yaml
+*.kubeconfig
+*.pem
+*.key
+*.crt
+.env
+users.json
+scan_reports/
+trivy-reports/
+
+# Python and editor artifacts
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/

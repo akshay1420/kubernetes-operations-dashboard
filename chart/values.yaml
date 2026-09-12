@@ -1,0 +1,79 @@
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # Replace with your own registry/repository before installing.
+  repository: ghcr.io/your-github-org/kubernetes-operations-dashboard
+  tag: "0.1.29"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+auth:
+  enabled: false
+  secretName: kubernetes-operations-dashboard-auth
+  # Use a pre-created Secret instead of chart-managed credentials if desired.
+  # It must contain users.json and session-secret keys.
+  existingSecret: ""
+  users: []
+  sessionSecret: ""
+
+# Current-state checks only. No Prometheus or persistent metrics database is used.
+realtime:
+  refreshSeconds: 30
+  nodeCpuWarning: 85
+  nodeMemoryWarning: 85
+  podRestartWarning: 5
+  pendingPodWarningSeconds: 600
+
+serviceAccount:
+  create: true
+  name: ""
+
+# A RoleBinding is created in each named namespace. Actions outside this list
+# are denied, even though users can see the namespace name in the selector.
+rbac:
+  # true binds operational permissions throughout the cluster. Keep false to
+  # bind the operator role only in the namespaces listed below.
+  clusterWideActions: false
+  allowedNamespaces: []
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: dashboard.example.internal
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Recommended: use ingress OIDC authentication (for example oauth2-proxy).
+# Do not set a password in this application or expose it with a public LoadBalancer.
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Preferred (not required) spreading keeps replicas available on multi-node clusters
+# without preventing a single-node development cluster from scheduling them.
+podAntiAffinity:
+  enabled: true

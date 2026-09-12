@@ -1,0 +1,7 @@
+apiVersion: v2
+name: kubernetes-operations-dashboard
+description: A lightweight, real-time Kubernetes operations dashboard
+type: application
+version: 0.1.29
+appVersion: "0.1.29"
+kubeVersion: ">=1.21.0-0"

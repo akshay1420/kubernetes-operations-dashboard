@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubernetes-operations-dashboard.fullname" . }}
+  labels: { app.kubernetes.io/name: {{ include "kubernetes-operations-dashboard.name" . }} }
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector: { matchLabels: { app.kubernetes.io/name: {{ include "kubernetes-operations-dashboard.name" . }} } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: {{ include "kubernetes-operations-dashboard.name" . }} } }
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kubernetes-operations-dashboard.serviceAccountName" . }}
+      securityContext: { runAsNonRoot: true, fsGroup: 10001 }
+      {{- if .Values.podAntiAffinity.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: {{ include "kubernetes-operations-dashboard.name" . }}
+                topologyKey: kubernetes.io/hostname
+      {{- end }}
+      volumes:
+        - name: runtime
+          emptyDir: {}
+        {{- if .Values.auth.enabled }}
+        - name: auth
+          secret:
+            secretName: {{ include "kubernetes-operations-dashboard.authSecretName" . }}
+        {{- end }}
+      containers:
+        - name: dashboard
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: DASHBOARD_REFRESH_SECONDS
+              value: {{ .Values.realtime.refreshSeconds | quote }}
+            - name: DASHBOARD_NODE_CPU_WARNING
+              value: {{ .Values.realtime.nodeCpuWarning | quote }}
+            - name: DASHBOARD_NODE_MEMORY_WARNING
+              value: {{ .Values.realtime.nodeMemoryWarning | quote }}
+            - name: DASHBOARD_POD_RESTART_WARNING
+              value: {{ .Values.realtime.podRestartWarning | quote }}
+            - name: DASHBOARD_PENDING_WARNING_SECONDS
+              value: {{ .Values.realtime.pendingPodWarningSeconds | quote }}
+            - name: DASHBOARD_AUTH_REQUIRED
+              value: {{ ternary "true" "false" .Values.auth.enabled | quote }}
+            {{- if .Values.auth.enabled }}
+            - name: DASHBOARD_SESSION_SECRET
+              valueFrom: { secretKeyRef: { name: {{ include "kubernetes-operations-dashboard.authSecretName" . }}, key: session-secret } }
+            {{- end }}
+          volumeMounts:
+            - name: runtime
+              mountPath: /tmp
+            {{- if .Values.auth.enabled }}
+            - name: auth
+              mountPath: /etc/kubernetes-dashboard-auth
+              readOnly: true
+            {{- end }}
+          ports: [{ name: http, containerPort: 8787 }]
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          readinessProbe: { httpGet: { path: /, port: http }, initialDelaySeconds: 3 }
+          livenessProbe: { httpGet: { path: /, port: http }, initialDelaySeconds: 10 }
