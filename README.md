@@ -11,8 +11,14 @@ It works with conformant Kubernetes clusters. The cluster needs the Metrics API 
 - Per-container logs, previous-container logs, time-range selection, and in-browser log search.
 - Download the selected container log view as a timestamped `.log` file.
 - Workload application context: selector-matched Pods, HPA configuration, Services, ready EndpointSlice targets, and Ingress routes.
+- Application map for each Deployment, StatefulSet, or DaemonSet, with live rollout status and workload-to-Pod-to-Service-to-Ingress relationships.
+- Downloadable workload diagnostics bundle containing workload and Pod JSON, `describe` output, workload events, and recent all-container logs.
+- Capacity & limits view: per-container CPU/memory requests, limits, live usage, matching workload ready/desired replica state, Pod/main/init/missing-policy filters, totals, and Excel-compatible CSV export for sizing reviews. Namespace LimitRange defaults are identified separately from values set directly on a container.
+- Resource Explorer for namespace-level HPA, Services/endpoints, Ingresses, PVCs, Jobs, CronJobs, quotas, and limit ranges.
 - Pod, workload, and node diagnostics, plus namespace quota/HPA/CronJob, PVC, Service, Ingress, and EndpointSlice views.
 - Confirmation-gated rollout restarts for Deployments, StatefulSets, and DaemonSets; controller-managed pod restart; optional replica scaling for Deployments and StatefulSets.
+- Optional confirmation-gated CronJob suspend/resume, CronJob schedule editing, and HPA minimum/maximum replica updates.
+- Click any Resource Explorer row to view the corresponding Kubernetes `describe` output, without leaving the dashboard.
 - Local application login with `read` and `write` roles, plus Kubernetes RBAC restrictions.
 
 ## How it works
@@ -43,7 +49,7 @@ The dashboard is deployed inside the target cluster. It reads live Kubernetes st
 
 ## Security model
 
-The dashboard is intentionally not an admin console: it has no shell/exec, YAML editor, secret access, or arbitrary deletion capability. Its ServiceAccount gets cluster-wide **read-only** access to node and namespace metadata. Workload reads and restart actions are granted only to explicitly selected namespaces unless `rbac.clusterWideActions` is enabled.
+The dashboard is intentionally not an admin console: it has no shell/exec, YAML editor, secret access, or arbitrary deletion capability. Its ServiceAccount gets cluster-wide **read-only** access to node and namespace metadata. Workload reads and optional write actions are granted only to explicitly selected namespaces unless `rbac.clusterWideActions` is enabled. The optional resource edits are deliberately narrow: CronJobs can change only `spec.schedule`, while HPAs can change only `minReplicas` and `maxReplicas`.
 
 For production, put an internal HTTPS Ingress with your SSO/OIDC proxy in front of it. The optional built-in login is suitable for a controlled internal environment, but it is not a substitute for corporate identity management or per-user Kubernetes audit identities.
 
