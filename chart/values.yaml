@@ -6,7 +6,7 @@ fullnameOverride: ""
 image:
   # Replace with your own registry/repository before installing.
   repository: ghcr.io/your-github-org/kubernetes-operations-dashboard
-  tag: "0.1.29"
+  tag: "0.1.32"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -38,6 +38,12 @@ rbac:
   # bind the operator role only in the namespaces listed below.
   clusterWideActions: false
   allowedNamespaces: []
+
+# Operational feature gates. Read access continues to be controlled by the
+# ServiceAccount RBAC bindings above. Scaling is disabled unless explicitly enabled.
+actions:
+  scale:
+    enabled: false
 
 service:
   type: ClusterIP

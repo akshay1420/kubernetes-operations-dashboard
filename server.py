@@ -27,8 +27,10 @@ REALTIME_CONFIG = {
     "nodeMemoryWarning": int(os.environ.get("DASHBOARD_NODE_MEMORY_WARNING", "85")),
     "podRestartWarning": int(os.environ.get("DASHBOARD_POD_RESTART_WARNING", "5")),
     "pendingPodWarningSeconds": int(os.environ.get("DASHBOARD_PENDING_WARNING_SECONDS", "600")),
+    "scaleEnabled": os.environ.get("DASHBOARD_SCALE_ENABLED", "false").lower() == "true",
 }
 AUTH_REQUIRED = os.environ.get("DASHBOARD_AUTH_REQUIRED", "false").lower() == "true"
+SCALE_ENABLED = os.environ.get("DASHBOARD_SCALE_ENABLED", "false").lower() == "true"
 AUTH_FILE = os.environ.get("DASHBOARD_AUTH_FILE", "/etc/kubernetes-dashboard-auth/users.json")
 SESSION_SECRET = os.environ.get("DASHBOARD_SESSION_SECRET", "")
 
@@ -93,6 +95,23 @@ def top_rows(args, columns):
         if len(parts) >= len(columns):
             rows.append(dict(zip(columns, parts)))
     return rows
+
+def labels_match(selector, labels):
+    """Return True when every Service selector label is present on a Pod."""
+    selector, labels = selector or {}, labels or {}
+    return bool(selector) and all(labels.get(key) == val for key, val in selector.items())
+
+def ingress_routes(ingresses, service_name):
+    """Extract only the HTTP routes which target a selected Service."""
+    routes = []
+    for ingress in ingresses:
+        for rule in ingress.get("spec", {}).get("rules", []) or []:
+            host = rule.get("host", "*")
+            for path in rule.get("http", {}).get("paths", []) or []:
+                backend = path.get("backend", {}).get("service", {})
+                if backend.get("name") == service_name:
+                    routes.append({"host": host, "path": path.get("path", "/")})
+    return routes
 
 class Handler(SimpleHTTPRequestHandler):
     def end_headers(self):
@@ -184,6 +203,34 @@ class Handler(SimpleHTTPRequestHandler):
                 if kind not in {"deployment", "statefulset", "daemonset"}:
                     raise ValueError("Unsupported workload kind")
                 self.json(json.loads(run_kubectl(["get", kind, name, "-n", namespace, "-o", "json"])))
+            elif parsed.path == "/api/workload-context":
+                namespace, kind, name = value(params, "namespace"), value(params, "kind"), value(params, "name")
+                if kind not in {"deployment", "statefulset", "daemonset"}:
+                    raise ValueError("Unsupported workload kind")
+                workload = json.loads(run_kubectl(["get", kind, name, "-n", namespace, "-o", "json"]))
+                pod_selector = workload.get("spec", {}).get("selector", {}).get("matchLabels", {})
+                all_pods = json.loads(run_kubectl(["get", "pods", "-n", namespace, "-o", "json"])).get("items", [])
+                pods = [pod for pod in all_pods if labels_match(pod_selector, pod.get("metadata", {}).get("labels", {}))]
+                all_services = json.loads(run_kubectl(["get", "service", "-n", namespace, "-o", "json"])).get("items", [])
+                services = [service for service in all_services if any(labels_match(service.get("spec", {}).get("selector", {}), pod.get("metadata", {}).get("labels", {})) for pod in pods)]
+                all_ingresses = json.loads(run_kubectl(["get", "ingress", "-n", namespace, "-o", "json"])).get("items", [])
+                all_hpas = json.loads(run_kubectl(["get", "hpa", "-n", namespace, "-o", "json"])).get("items", [])
+                all_endpoint_slices = json.loads(run_kubectl(["get", "endpointslice", "-n", namespace, "-o", "json"])).get("items", [])
+                selected_services = []
+                for service in services:
+                    service_name = service.get("metadata", {}).get("name")
+                    endpoint_slices = [item for item in all_endpoint_slices if item.get("metadata", {}).get("labels", {}).get("kubernetes.io/service-name") == service_name]
+                    selected_services.append({
+                        "name": service_name,
+                        "type": service.get("spec", {}).get("type", "ClusterIP"),
+                        "clusterIP": service.get("spec", {}).get("clusterIP", "—"),
+                        "ports": service.get("spec", {}).get("ports", []),
+                        "routes": ingress_routes(all_ingresses, service_name),
+                        "endpointCount": sum(len(item.get("endpoints", [])) for item in endpoint_slices),
+                        "readyEndpoints": sum(sum(1 for endpoint in item.get("endpoints", []) if endpoint.get("conditions", {}).get("ready") is not False) for item in endpoint_slices)
+                    })
+                hpas = [item for item in all_hpas if item.get("spec", {}).get("scaleTargetRef", {}).get("kind", "").lower() == kind and item.get("spec", {}).get("scaleTargetRef", {}).get("name") == name]
+                self.json({"workload": workload, "pods": pods, "services": selected_services, "hpas": hpas})
             elif parsed.path == "/api/node-detail":
                 namespace, node = value(params, "namespace"), value(params, "node")
                 node_doc = json.loads(run_kubectl(["get", "node", node, "-o", "json"]))
@@ -268,6 +315,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.json({"message": output.strip() + "; Kubernetes will recreate it", "resource": "pod/" + name})
                 return
             if parsed.path == "/api/scale":
+                if not SCALE_ENABLED:
+                    raise ValueError("Replica scaling is disabled by the Helm actions.scale.enabled setting")
                 if kind not in {"deployment", "statefulset"}:
                     raise ValueError("Only Deployments and StatefulSets can be scaled")
                 replicas = int(payload.get("replicas", -1))
