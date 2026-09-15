@@ -1,4 +1,14 @@
 replicaCount: 1
+history:
+  enabled: false
+  namespaces: []
+  intervalSeconds: 300
+  retentionDays: 30
+  maxBytes: "1073741824"
+  logsEnabled: false
+  storageClassName: ""
+  size: 5Gi
+  existingClaim: ""
 
 nameOverride: ""
 fullnameOverride: ""
@@ -6,7 +16,7 @@ fullnameOverride: ""
 image:
   # Replace with your own registry/repository before installing.
   repository: ghcr.io/your-github-org/kubernetes-operations-dashboard
-  tag: "0.1.39"
+  tag: "0.1.45"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 

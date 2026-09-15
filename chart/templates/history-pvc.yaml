@@ -1,0 +1,16 @@
+{{- if and .Values.history.enabled (not .Values.history.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kubernetes-operations-dashboard.fullname" . }}-history
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.history.storageClassName }}
+  storageClassName: {{ .Values.history.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.history.size }}
+{{- end }}

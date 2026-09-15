@@ -1,9 +1,18 @@
+{{- if and .Values.history.enabled (ne (int .Values.replicaCount) 1) }}
+{{- fail "File history requires replicaCount=1 (single writer)." }}
+{{- end }}
+{{- if and .Values.history.enabled (empty .Values.history.namespaces) }}
+{{- fail "Set history.namespaces explicitly." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "kubernetes-operations-dashboard.fullname" . }}
   labels: { app.kubernetes.io/name: {{ include "kubernetes-operations-dashboard.name" . }} }
 spec:
+  {{- if .Values.history.enabled }}
+  strategy: { type: Recreate }
+  {{- end }}
   replicas: {{ .Values.replicaCount }}
   selector: { matchLabels: { app.kubernetes.io/name: {{ include "kubernetes-operations-dashboard.name" . }} } }
   template:
@@ -26,6 +35,11 @@ spec:
                 topologyKey: kubernetes.io/hostname
       {{- end }}
       volumes:
+        {{- if .Values.history.enabled }}
+        - name: history
+          persistentVolumeClaim:
+            claimName: {{ .Values.history.existingClaim | default (printf "%s-history" (include "kubernetes-operations-dashboard.fullname" .)) }}
+        {{- end }}
         - name: runtime
           emptyDir: {}
         {{- if .Values.auth.enabled }}
@@ -38,6 +52,18 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
+            - name: DASHBOARD_HISTORY_ENABLED
+              value: {{ .Values.history.enabled | quote }}
+            - name: DASHBOARD_HISTORY_NAMESPACES
+              value: {{ join "," .Values.history.namespaces | quote }}
+            - name: DASHBOARD_HISTORY_INTERVAL
+              value: {{ .Values.history.intervalSeconds | quote }}
+            - name: DASHBOARD_HISTORY_RETENTION
+              value: {{ .Values.history.retentionDays | quote }}
+            - name: DASHBOARD_HISTORY_MAX_BYTES
+              value: {{ .Values.history.maxBytes | int64 | quote }}
+            - name: DASHBOARD_HISTORY_LOGS
+              value: {{ .Values.history.logsEnabled | quote }}
             - name: DASHBOARD_REFRESH_SECONDS
               value: {{ .Values.realtime.refreshSeconds | quote }}
             - name: DASHBOARD_NODE_CPU_WARNING
@@ -63,6 +89,10 @@ spec:
               valueFrom: { secretKeyRef: { name: {{ include "kubernetes-operations-dashboard.authSecretName" . }}, key: session-secret } }
             {{- end }}
           volumeMounts:
+            {{- if .Values.history.enabled }}
+            - name: history
+              mountPath: /data/history
+            {{- end }}
             - name: runtime
               mountPath: /tmp
             {{- if .Values.auth.enabled }}
