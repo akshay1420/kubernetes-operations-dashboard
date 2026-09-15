@@ -1,5 +1,22 @@
 # Kubernetes Operations Dashboard
 
+## 0.1.43 — Shared Pod log archive
+
+The Pod Logs button now saves fetched logs to the configured PVC and links to the same
+records in History & insights. See [release setup and retention](RELEASE-0.1.43.md).
+
+## 0.1.41 startup fix
+
+Accept scientific-notation whole numbers in history configuration and render the
+Helm storage cap as a decimal integer. Fixes startup failure in 0.1.40 even with
+history disabled. No permissions or collection behavior change.
+
+## New in 0.1.40 (preview)
+
+Optional PVC-backed resource history, retained log snapshots, evidence-based memory
+review candidates, CSV export and a refreshed interface. See [History setup and limitations](HISTORY.md).
+Existing live views remain available without persistence.
+
 A lightweight, dependency-free dashboard for operating an existing Kubernetes cluster. It uses the Kubernetes API through `kubectl` and the dashboard ServiceAccount; it does not depend on Prometheus, a database, or any cloud-provider API.
 
 It works with conformant Kubernetes clusters. The cluster needs the Metrics API (`metrics-server`) only for live node and pod CPU/memory figures. All other pages work without it.

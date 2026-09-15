@@ -18,6 +18,7 @@ import posixpath
 import subprocess
 import time
 import zipfile
+from history import History
 
 ROOT = Path(__file__).parent
 HOST = os.environ.get("K8S_DASHBOARD_HOST", "127.0.0.1")
@@ -93,6 +94,8 @@ def run_kubectl(args):
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "kubectl command failed")
     return result.stdout
+
+HISTORY = History(run_kubectl)
 
 def value(params, name, required=True):
     item = params.get(name, [""])[0].strip()
@@ -213,7 +216,13 @@ class Handler(SimpleHTTPRequestHandler):
             return super().do_GET()
         params = parse_qs(parsed.query)
         try:
-            if parsed.path == "/api/namespaces":
+            if parsed.path == "/api/history":
+                namespace = value(params, "namespace")
+                # Recheck current access before returning retained data.
+                run_kubectl(["get", "pods", "-n", namespace, "-o", "name"])
+                self.json(HISTORY.query(namespace, int(value(params, "days", False) or "7"),
+                                        value(params, "kind", False) or "metrics", value(params, "search", False), value(params, "pod", False), value(params, "container", False)))
+            elif parsed.path == "/api/namespaces":
                 raw = run_kubectl(["get", "namespaces", "-o", "json"])
                 self.json(json.loads(raw))
             elif parsed.path == "/api/nodes":
@@ -401,7 +410,9 @@ class Handler(SimpleHTTPRequestHandler):
                 if container: args.extend(["-c", container])
                 if previous: args.append("--previous")
                 if since != "all": args.append("--since=" + since)
-                self.json({"logs": run_kubectl(args)})
+                output = run_kubectl(args)
+                archive = HISTORY.save_viewed_logs(namespace, pod, container, output, previous, since)
+                self.json({"logs": output, "archive": archive})
             elif parsed.path == "/api/events":
                 namespace = value(params, "namespace")
                 self.json(json.loads(run_kubectl(["get", "events", "-n", namespace, "--sort-by=.lastTimestamp", "-o", "json"])))
@@ -514,5 +525,6 @@ class Handler(SimpleHTTPRequestHandler):
             self.api_error(err)
 
 if __name__ == "__main__":
+    HISTORY.start()
     print(f"Kubernetes Operations Dashboard: http://{HOST}:{PORT}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
