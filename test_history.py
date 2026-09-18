@@ -9,6 +9,18 @@ from history import History, quantity, integer_setting
 
 
 class HistoryTests(unittest.TestCase):
+    def test_48_hour_and_custom_time_ranges(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'DASHBOARD_HISTORY_PATH': folder, 'DASHBOARD_HISTORY_NAMESPACES': 'test'}):
+            h=History(lambda args: '')
+            now=time.time()
+            h.append('test','changes',[dict(ts=now-36*3600,resource='Service/old'),dict(ts=now-2*3600,resource='Service/new')])
+            self.assertEqual(len(h.query('test',1,'changes')['items']),1)
+            self.assertEqual(len(h.query('test',2,'changes')['items']),2)
+            result=h.query('test',30,'changes',start=now-40*3600,end=now-30*3600)
+            self.assertEqual([row['resource'] for row in result['items']],['Service/old'])
+            with self.assertRaisesRegex(ValueError,'custom history period'):
+                h.query('test',30,'changes',start=now,end=now-1)
+
     def test_pod_inventory_survives_log_result_cap(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'DASHBOARD_HISTORY_PATH': folder, 'DASHBOARD_HISTORY_NAMESPACES': 'test'}):
             h=History(lambda args: '')
@@ -44,6 +56,13 @@ class HistoryTests(unittest.TestCase):
             result=h.query('test', 7, 'logs')
             self.assertEqual(len(result['items']), 1)
             self.assertEqual(result['errors'], ['test/pod: logs: EOF'])
+
+    def test_application_log_filter_includes_replacement_pods(self):
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {'DASHBOARD_HISTORY_PATH': folder, 'DASHBOARD_HISTORY_NAMESPACES': 'test'}):
+            h=History(lambda args: '')
+            now=time.time();h.append('test','logs',[dict(ts=now,pod='pje-old',application='pje-rs1',container='main',text='old'),dict(ts=now,pod='other-1',application='other',container='main',text='other')])
+            rows=h.query('test',7,'logs',application='pje')['items']
+            self.assertEqual([row['text'] for row in rows],['old'])
 
     def test_helm_scientific_notation_with_history_disabled(self):
         with patch.dict(os.environ, {'DASHBOARD_HISTORY_ENABLED': 'false', 'DASHBOARD_HISTORY_MAX_BYTES': '1.073741824e+09'}):

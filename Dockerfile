@@ -25,6 +25,11 @@ WORKDIR /app
 COPY --from=kubectl-download /download/kubectl /usr/local/bin/kubectl
 COPY server.py app.js auth.js overview.js resources.js applications.js capacity.js index.html login.html login.js styles.css entrypoint.sh ./
 COPY history.py history.js experience.css ./
+COPY changes.py changes.js ./
+COPY namespace-scope.js ./
+COPY view-preferences.js live-updates.js ./
+COPY design-system.css ui-v4.js ./
+COPY node-describe.js ./
 
 # This application only uses the Python standard library. pip, setuptools,
 # and wheel are build-time installers, so remove them from the runtime image.

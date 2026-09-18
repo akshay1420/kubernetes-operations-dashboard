@@ -1,9 +1,23 @@
 # Kubernetes Operations Dashboard
 
+Current version: **0.1.57**. Includes the operations workspace UI, application topology,
+namespace change history, saved logs, capacity insights and clickable worker node details.
+See [CHANGELOG.md](CHANGELOG.md) for consolidated release history.
+
+## 0.1.48 — WebLogic and namespace changes
+
+Opt-in WebLogic Domain tracking plus Pod, Service, Ingress, PVC and namespace-policy
+configuration history. See [coverage and setup](CHANGELOG.md).
+
+## 0.1.46 — What changed recently?
+
+The Changes tab compares configuration snapshots and records dashboard operations
+with user, outcome and before/after values. See [setup and limitations](CHANGELOG.md).
+
 ## 0.1.43 — Shared Pod log archive
 
 The Pod Logs button now saves fetched logs to the configured PVC and links to the same
-records in History & insights. See [release setup and retention](RELEASE-0.1.43.md).
+records in History & insights. See [release setup and retention](CHANGELOG.md).
 
 ## 0.1.41 startup fix
 

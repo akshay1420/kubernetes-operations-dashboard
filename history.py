@@ -8,6 +8,7 @@ import re
 import threading
 import time
 from pathlib import Path
+from changes import Changes
 
 
 def integer_setting(name, default):
@@ -50,6 +51,7 @@ class History:
         self.errors = []
         self.last = None
         self.lock = threading.RLock()
+        self.changes = Changes(self)
 
     def start(self):
         if self.enabled:
@@ -148,6 +150,11 @@ class History:
             started = time.time()
             self.errors = []
             for namespace in self.namespaces:
+                self.changes.collect_extended(namespace)
+                try:
+                    self.changes.collect(namespace)
+                except Exception as error:
+                    self.errors.append(namespace + ': configuration history: ' + str(error)[:300])
                 try:
                     self.collect(namespace)
                 except Exception as error:
@@ -159,12 +166,17 @@ class History:
             self.last = time.time()
             time.sleep(max(1, self.interval - (time.time() - started)))
 
-    def query(self, namespace, days, kind, search='', pod='', container=''):
+    def query(self, namespace, days, kind, search='', pod='', container='', resources=None, start=None, end=None, application=''):
         if namespace not in self.namespaces:
             raise ValueError('Namespace is not configured for history collection')
-        if kind not in ('metrics', 'logs') or days not in (1, 7, 30):
+        if kind not in ('metrics', 'logs', 'changes') or days not in (1, 2, 7, 30):
             raise ValueError('Invalid history query')
-        cutoff = time.time() - days * 86400
+        now = time.time()
+        cutoff, until = now - days * 86400, now
+        if start is not None or end is not None:
+            if start is None or end is None or start >= end or end > now + 300 or start < now - self.retention * 86400:
+                raise ValueError('Invalid custom history period')
+            cutoff, until = start, end
         rows = []
         pod_names, container_names = set(), set()
         truncated = False
@@ -179,7 +191,9 @@ class History:
                         continue  # An in-flight final line is retried on the next read.
                     if kind == 'logs' and not str(row.get('text', '')).strip():
                         continue  # Ignore empty snapshots written by earlier versions.
-                    if row['ts'] < cutoff:
+                    if row['ts'] < cutoff or row['ts'] > until:
+                        continue
+                    if application and not (row.get('application', '') == application or row.get('application', '').startswith(application + '-') or row.get('pod', '').startswith(application + '-')):
                         continue
                     if kind == 'logs':
                         pod_names.add(row.get('pod', ''))
@@ -189,7 +203,9 @@ class History:
                         continue
                     if container and row.get('container') != container:
                         continue
-                    if row['ts'] >= cutoff and search.lower() in (row.get('pod', '') + ' ' + row.get('application', '') + ' ' + row.get('text', '')).lower():
+                    if kind == 'changes' and resources is not None and str(row.get('resource', '')).lower() not in resources:
+                        continue
+                    if row['ts'] >= cutoff and search.lower() in (row.get('pod', '') + ' ' + row.get('application', '') + ' ' + row.get('text', '') + ' ' + row.get('resource', '') + ' ' + str(row.get('actor') or '')).lower():
                         if kind == 'logs' and len(rows) >= 200:
                             truncated = True
                             continue
@@ -201,8 +217,32 @@ class History:
                 break
         rows.sort(key=lambda r: r['ts'])
         scoped_errors = [e for e in self.errors if e.startswith(namespace + ':') or e.startswith(namespace + '/') or e.startswith('Retention:')]
-        result = dict(enabled=self.enabled, lastCollection=self.last, errors=scoped_errors[:20], interval=self.interval,
+        result = dict(namespace=namespace, rangeStart=cutoff, rangeEnd=until, enabled=self.enabled, lastCollection=self.last, errors=scoped_errors[:20], interval=self.interval,
                       retentionDays=self.retention, logsEnabled=self.logs, truncated=truncated)
+        if kind == 'changes':
+            rows = [dict(row, namespace=namespace) for row in rows]
+            latest = {}
+            observed = {}
+            for row in rows:
+                if row.get('id'):
+                    latest[row['id']] = row
+                else:
+                    key = (row.get('resource'), row.get('source', 'observed'))
+                    if key not in observed:
+                        row['firstTs'] = row['ts']
+                        row['occurrenceCount'] = 1
+                        observed[key] = row
+                    else:
+                        first = observed[key]
+                        row['firstTs'] = first['firstTs']
+                        row['occurrenceCount'] = first['occurrenceCount'] + 1
+                        observed[key] = row
+            combined = list(observed.values()) + list(latest.values())
+            result['items'] = sorted(combined, key=lambda r: r['ts'], reverse=True)[:500]
+            result['rawObservedCount'] = sum(row.get('occurrenceCount', 1) for row in observed.values())
+            result['truncated'] = truncated or len(combined) > 500
+            result['baselineExists'] = (self.root / namespace / 'configuration-baseline.json').exists()
+            return result
         if kind == 'logs':
             result['pods'] = sorted(pod_names - {''})
             result['containers'] = sorted(container_names - {''})

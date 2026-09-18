@@ -1,6 +1,7 @@
 replicaCount: 1
 history:
   enabled: false
+  weblogicEnabled: false
   namespaces: []
   intervalSeconds: 300
   retentionDays: 30
@@ -16,7 +17,7 @@ fullnameOverride: ""
 image:
   # Replace with your own registry/repository before installing.
   repository: ghcr.io/your-github-org/kubernetes-operations-dashboard
-  tag: "0.1.45"
+  tag: "0.1.57"
   pullPolicy: IfNotPresent
 imagePullSecrets: []
 
@@ -44,6 +45,9 @@ serviceAccount:
 # A RoleBinding is created in each named namespace. Actions outside this list
 # are denied, even though users can see the namespace name in the selector.
 rbac:
+  # Optional read-only rules for CRDs shown by the discovered resource browser.
+  # Example: [{apiGroups: ["example.com"], resources: ["widgets"], verbs: ["get", "list"]}]
+  extraReadRules: []
   # true binds operational permissions throughout the cluster. Keep false to
   # bind the operator role only in the namespaces listed below.
   clusterWideActions: false

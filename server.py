@@ -180,6 +180,10 @@ class Handler(SimpleHTTPRequestHandler):
         return current if not write or current["role"] in {"write", "admin"} else None
 
     def json(self, data, status=200, cookie=None):
+        if getattr(self, 'action_history_status', None) and 'message' in data:
+            data['actionHistory'] = self.action_history_status
+            if 'failed' in self.action_history_status:
+                data['message'] += '; ' + self.action_history_status
         body = json.dumps(data).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -198,6 +202,13 @@ class Handler(SimpleHTTPRequestHandler):
 
     def api_error(self, err, status=400):
         self.json({"error": str(err)}, status)
+
+    def action_run(self, command):
+        namespace, kind, name = self.action_target
+        output, self.action_history_status = HISTORY.changes.execute(
+            namespace, kind, name, urlparse(self.path).path.rsplit('/', 1)[-1],
+            self.principal()['username'], command)
+        return output
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -221,14 +232,44 @@ class Handler(SimpleHTTPRequestHandler):
                 # Recheck current access before returning retained data.
                 run_kubectl(["get", "pods", "-n", namespace, "-o", "name"])
                 self.json(HISTORY.query(namespace, int(value(params, "days", False) or "7"),
-                                        value(params, "kind", False) or "metrics", value(params, "search", False), value(params, "pod", False), value(params, "container", False)))
+                                        value(params, "kind", False) or "metrics", value(params, "search", False), value(params, "pod", False), value(params, "container", False),
+                                        {r.lower() for r in params['resource']} if 'resource' in params else None,
+                                        float(value(params, 'start', False)) if value(params, 'start', False) else None,
+                                        float(value(params, 'end', False)) if value(params, 'end', False) else None,
+                                        value(params, 'application', False)))
             elif parsed.path == "/api/namespaces":
                 raw = run_kubectl(["get", "namespaces", "-o", "json"])
                 self.json(json.loads(raw))
             elif parsed.path == "/api/nodes":
                 self.json(json.loads(run_kubectl(["get", "nodes", "-o", "json"])))
+            elif parsed.path == "/api/namespace-revision":
+                namespace = value(params, "namespace")
+                document = json.loads(run_kubectl(["get", "deployments,statefulsets,daemonsets,pods,services,hpa,ingress,pvc,events", "-n", namespace, "-o", "json"]))
+                versions = sorted((item.get('kind', '') + '/' + item.get('metadata', {}).get('name', ''), item.get('metadata', {}).get('resourceVersion', '')) for item in document.get('items', []))
+                self.json({"namespace": namespace, "revision": hashlib.sha256(json.dumps(versions).encode()).hexdigest(), "checkedAt": time.time()})
+            elif parsed.path == "/api/resource-discovery":
+                namespace = value(params, "namespace")
+                resources = sorted(set(run_kubectl(["api-resources", "--namespaced=true", "--verbs=list", "-o", "name"]).splitlines()) - {'secrets'})
+                self.json({"namespace": namespace, "resources": resources})
+            elif parsed.path == "/api/discovered-resources":
+                namespace, resource = value(params, "namespace"), value(params, "resource")
+                available = set(run_kubectl(["api-resources", "--namespaced=true", "--verbs=list", "-o", "name"]).splitlines())
+                if resource == 'secrets' or resource not in available:
+                    raise ValueError("Unsupported or non-namespaced resource")
+                document = json.loads(run_kubectl(["get", resource, "-n", namespace, "-o", "json"])); document['resource'] = resource
+                self.json(document)
             elif parsed.path == "/api/node-metrics":
                 self.json({"items": top_rows(["top", "nodes", "--no-headers"], ["name", "cpu", "cpuPercent", "memory", "memoryPercent"])})
+            elif parsed.path == "/api/applications":
+                namespace = value(params, "namespace")
+                result = json.loads(run_kubectl(["get", "deployments,statefulsets,daemonsets,cronjobs", "-n", namespace, "-o", "json"]))
+                result['warnings'] = []
+                if os.getenv('DASHBOARD_HISTORY_WEBLOGIC', 'false').lower() == 'true':
+                    try:
+                        result['items'] += json.loads(run_kubectl(['get', 'domains.weblogic.oracle', '-n', namespace, '-o', 'json']))['items']
+                    except RuntimeError as error:
+                        result['warnings'].append('WebLogic applications unavailable: ' + str(error))
+                self.json(result)
             elif parsed.path == "/api/workloads":
                 namespace = value(params, "namespace")
                 self.json(json.loads(run_kubectl(["get", "deployments,statefulsets,daemonsets", "-n", namespace, "-o", "json"])))
@@ -257,12 +298,27 @@ class Handler(SimpleHTTPRequestHandler):
                 self.json(json.loads(run_kubectl(["get", kind, name, "-n", namespace, "-o", "json"])))
             elif parsed.path == "/api/workload-context":
                 namespace, kind, name = value(params, "namespace"), value(params, "kind"), value(params, "name")
-                if kind not in {"deployment", "statefulset", "daemonset"}:
+                if kind not in {"deployment", "statefulset", "daemonset", "cronjob", "domain"}:
                     raise ValueError("Unsupported workload kind")
-                workload = json.loads(run_kubectl(["get", kind, name, "-n", namespace, "-o", "json"]))
+                workload = json.loads(run_kubectl(["get", 'domains.weblogic.oracle' if kind == 'domain' else kind, name, "-n", namespace, "-o", "json"]))
                 pod_selector = workload.get("spec", {}).get("selector", {}).get("matchLabels", {})
                 all_pods = json.loads(run_kubectl(["get", "pods", "-n", namespace, "-o", "json"])).get("items", [])
                 pods = [pod for pod in all_pods if labels_match(pod_selector, pod.get("metadata", {}).get("labels", {}))]
+                context_warnings = []
+                try:
+                    all_replica_sets = json.loads(run_kubectl(["get", "replicaset", "-n", namespace, "-o", "json"])).get("items", [])
+                except RuntimeError:
+                    # Keep Context/Application usable during upgrades from charts that did
+                    # not yet grant read-only ReplicaSet access.
+                    all_replica_sets = []
+                    context_warnings.append("ReplicaSet details are unavailable to the dashboard ServiceAccount. Upgrade the Helm chart to enable this read-only topology layer.")
+                replica_sets = [item for item in all_replica_sets if any(ref.get('uid') == workload.get('metadata', {}).get('uid') for ref in item.get('metadata', {}).get('ownerReferences', []))]
+                if kind in {'domain', 'cronjob'}:
+                    owner_uids = {workload['metadata']['uid']}
+                    if kind == 'cronjob':
+                        jobs = json.loads(run_kubectl(['get', 'jobs', '-n', namespace, '-o', 'json']))['items']
+                        owner_uids = {job['metadata']['uid'] for job in jobs if any(ref.get('uid') in owner_uids for ref in job['metadata'].get('ownerReferences', []))}
+                    pods = [pod for pod in all_pods if any(ref.get('uid') in owner_uids for ref in pod['metadata'].get('ownerReferences', []))]
                 all_services = json.loads(run_kubectl(["get", "service", "-n", namespace, "-o", "json"])).get("items", [])
                 services = [service for service in all_services if any(labels_match(service.get("spec", {}).get("selector", {}), pod.get("metadata", {}).get("labels", {})) for pod in pods)]
                 all_ingresses = json.loads(run_kubectl(["get", "ingress", "-n", namespace, "-o", "json"])).get("items", [])
@@ -282,7 +338,10 @@ class Handler(SimpleHTTPRequestHandler):
                         "readyEndpoints": sum(sum(1 for endpoint in item.get("endpoints", []) if endpoint.get("conditions", {}).get("ready") is not False) for item in endpoint_slices)
                     })
                 hpas = [item for item in all_hpas if item.get("spec", {}).get("scaleTargetRef", {}).get("kind", "").lower() == kind and item.get("spec", {}).get("scaleTargetRef", {}).get("name") == name]
-                self.json({"workload": workload, "pods": pods, "services": selected_services, "hpas": hpas})
+                pvc_names = sorted({volume['persistentVolumeClaim']['claimName'] for pod in pods for volume in pod.get('spec', {}).get('volumes', []) if 'persistentVolumeClaim' in volume})
+                related = [workload['kind'] + '/' + name] + ['ReplicaSet/' + item['metadata']['name'] for item in replica_sets] + ['Pod/' + pod['metadata']['name'] for pod in pods] + ['Service/' + service['name'] for service in selected_services] + ['HorizontalPodAutoscaler/' + item['metadata']['name'] for item in hpas] + ['PersistentVolumeClaim/' + claim for claim in pvc_names]
+                related += ['Ingress/' + item['metadata']['name'] for item in all_ingresses if any(ingress_routes([item], service['name']) for service in selected_services)]
+                self.json({"workload": workload, "replicaSets": replica_sets, "pods": pods, "services": selected_services, "hpas": hpas, "pvcs": pvc_names, "relatedResources": related, "warnings": context_warnings})
             elif parsed.path == "/api/workload-diagnostics":
                 namespace, kind, name = value(params, "namespace"), value(params, "kind"), value(params, "name")
                 if kind not in {"deployment", "statefulset", "daemonset"}:
@@ -313,6 +372,15 @@ class Handler(SimpleHTTPRequestHandler):
                             bundle.writestr(prefix + "logs-error.txt", str(err))
                 filename = "%s-%s-%s-diagnostics.zip" % (namespace, kind, name)
                 self.binary(archive.getvalue(), filename, "application/zip")
+            elif parsed.path == "/api/node-describe":
+                node = value(params, "node")
+                # Establish node read access before attempting describe's supplementary reads.
+                document = json.loads(run_kubectl(["get", "node", node, "-o", "json"]))
+                try:
+                    output = run_kubectl(["describe", "node", node])
+                    self.json({"output": output, "warning": ""})
+                except RuntimeError as error:
+                    self.json({"output": json.dumps(document, indent=2), "warning": "Full node describe is unavailable. Showing readable Node details instead. " + str(error)})
             elif parsed.path == "/api/node-detail":
                 namespace, node = value(params, "namespace"), value(params, "node")
                 node_doc = json.loads(run_kubectl(["get", "node", node, "-o", "json"]))
@@ -452,6 +520,7 @@ class Handler(SimpleHTTPRequestHandler):
             kind = value({"kind": [str(payload.get("kind", ""))]}, "kind")
             name = value({"name": [str(payload.get("name", ""))]}, "name")
             confirmation = str(payload.get("confirmation", ""))
+            self.action_target = (namespace, 'pod' if parsed.path == '/api/restart-pod' else kind, name)
             if parsed.path == "/api/restart-pod":
                 if confirmation != "RESTART":
                     raise ValueError("Type RESTART to confirm")
@@ -460,7 +529,7 @@ class Handler(SimpleHTTPRequestHandler):
                 controller = next((o for o in owners if o.get("controller")), None)
                 if not controller or controller.get("kind") not in {"ReplicaSet", "StatefulSet", "DaemonSet", "Job"}:
                     raise ValueError("This pod is not controller-managed; restart is not allowed")
-                output = run_kubectl(["delete", "pod", name, "-n", namespace])
+                output = self.action_run(["delete", "pod", name, "-n", namespace])
                 self.json({"message": output.strip() + "; Kubernetes will recreate it", "resource": "pod/" + name})
                 return
             if parsed.path == "/api/scale":
@@ -473,7 +542,7 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("Replicas must be between 0 and 100")
                 if confirmation != "SCALE":
                     raise ValueError("Type SCALE to confirm")
-                output = run_kubectl(["scale", kind + "/" + name, "-n", namespace, "--replicas=" + str(replicas)])
+                output = self.action_run(["scale", kind + "/" + name, "-n", namespace, "--replicas=" + str(replicas)])
                 self.json({"message": output.strip(), "resource": kind + "/" + name})
                 return
             if parsed.path == "/api/cronjob-suspend":
@@ -486,7 +555,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if confirmation != expected:
                     raise ValueError("Type %s to confirm" % expected)
                 patch = json.dumps({"spec": {"suspend": suspend}})
-                output = run_kubectl(["patch", "cronjob", name, "-n", namespace, "--type=merge", "-p", patch])
+                output = self.action_run(["patch", "cronjob", name, "-n", namespace, "--type=merge", "-p", patch])
                 self.json({"message": output.strip(), "resource": "cronjob/" + name})
                 return
             if parsed.path == "/api/cronjob-edit":
@@ -497,7 +566,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if confirmation != "UPDATE SCHEDULE":
                     raise ValueError("Type UPDATE SCHEDULE to confirm")
                 patch = json.dumps({"spec": {"schedule": cron_schedule(payload.get("schedule"))}})
-                output = run_kubectl(["patch", "cronjob", name, "-n", namespace, "--type=merge", "-p", patch])
+                output = self.action_run(["patch", "cronjob", name, "-n", namespace, "--type=merge", "-p", patch])
                 self.json({"message": output.strip(), "resource": "cronjob/" + name})
                 return
             if parsed.path == "/api/hpa-edit":
@@ -511,7 +580,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if confirmation != "UPDATE HPA":
                     raise ValueError("Type UPDATE HPA to confirm")
                 patch = json.dumps({"spec": {"minReplicas": minimum, "maxReplicas": maximum}})
-                output = run_kubectl(["patch", "hpa", name, "-n", namespace, "--type=merge", "-p", patch])
+                output = self.action_run(["patch", "hpa", name, "-n", namespace, "--type=merge", "-p", patch])
                 self.json({"message": output.strip(), "resource": "hpa/" + name})
                 return
             resource = f"{kind}/{name}"
@@ -519,7 +588,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ValueError("Unsupported workload kind")
             if confirmation != "RESTART":
                 raise ValueError("Type RESTART to confirm")
-            output = run_kubectl(["rollout", "restart", resource, "-n", namespace])
+            output = self.action_run(["rollout", "restart", resource, "-n", namespace])
             self.json({"message": output.strip(), "resource": resource})
         except (ValueError, RuntimeError, json.JSONDecodeError) as err:
             self.api_error(err)

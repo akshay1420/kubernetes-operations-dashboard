@@ -61,7 +61,9 @@ spec:
             - name: DASHBOARD_HISTORY_RETENTION
               value: {{ .Values.history.retentionDays | quote }}
             - name: DASHBOARD_HISTORY_MAX_BYTES
-              value: {{ .Values.history.maxBytes | int64 | quote }}
+              value: {{ .Values.history.maxBytes | quote }}
+            - name: DASHBOARD_HISTORY_WEBLOGIC
+              value: {{ .Values.history.weblogicEnabled | quote }}
             - name: DASHBOARD_HISTORY_LOGS
               value: {{ .Values.history.logsEnabled | quote }}
             - name: DASHBOARD_REFRESH_SECONDS

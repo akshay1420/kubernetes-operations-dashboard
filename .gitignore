@@ -17,3 +17,8 @@ __pycache__/
 *.py[cod]
 .idea/
 .vscode/
+
+# Generated distribution and preview artifacts
+*.zip
+*.tgz
+*-preview.png

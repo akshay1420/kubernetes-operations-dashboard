@@ -33,6 +33,9 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets", "daemonsets"]
     verbs: ["get", "list", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list"]
   - apiGroups: ["autoscaling"]
     resources: ["horizontalpodautoscalers"]
     verbs: ["get", "list", "patch"]
@@ -42,12 +45,23 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list"]
+  {{- if .Values.history.weblogicEnabled }}
+  - apiGroups: ["weblogic.oracle"]
+    resources: ["domains", "clusters"]
+    verbs: ["get", "list"]
+  {{- end }}
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
     verbs: ["get", "list"]
   - apiGroups: ["metrics.k8s.io"]
     resources: ["pods"]
     verbs: ["get", "list"]
+{{- with .Values.rbac.extraReadRules }}
+{{ toYaml . | nindent 2 }}
+{{- end }}
 {{- if .Values.rbac.clusterWideActions }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -3,7 +3,7 @@
   const me=await r.json(),identity=document.querySelector('#identity');identity.textContent=`${me.username} · ${me.role}`;
   const clock=document.createElement('span');clock.style.cssText='margin-right:12px;color:#9ec7f1;font-size:12px';identity.before(clock);
   try{const t=await fetch('/api/time').then(x=>x.json()),start=Date.now(),format=()=>clock.textContent=`Server time: ${new Date(t.epoch*1000+Date.now()-start).toLocaleString()} ${t.timezone}`;format();setInterval(format,1000)}catch(e){clock.textContent='Server time unavailable'}
-  if(me.role==='read')document.head.insertAdjacentHTML('beforeend','<style>.restart-workload,.restart-pod,.scale-workload,.cronjob-action,.cronjob-edit,.hpa-edit{display:none!important}</style>');
+  if(!['write','admin'].includes(me.role))document.head.insertAdjacentHTML('beforeend','<style>.restart-workload,.restart-pod,.scale-workload,.cronjob-action,.cronjob-edit,.hpa-edit{display:none!important}</style>');
   document.querySelector('#logout').onclick=async()=>{await fetch('/api/logout',{method:'POST'});location.assign('/login.html')};
   try{const c=await fetch('/api/config').then(x=>x.json());if(!c.scaleEnabled)document.head.insertAdjacentHTML('beforeend','<style>.scale-workload{display:none!important}</style>');if(!c.cronJobSuspendEnabled)document.head.insertAdjacentHTML('beforeend','<style>.cronjob-action{display:none!important}</style>');if(!c.cronJobEditEnabled)document.head.insertAdjacentHTML('beforeend','<style>.cronjob-edit{display:none!important}</style>');if(!c.hpaEditEnabled)document.head.insertAdjacentHTML('beforeend','<style>.hpa-edit{display:none!important}</style>');setInterval(()=>{if(!document.hidden)loadNamespace()},c.refreshSeconds*1000)}catch(e){}
   let allLogs='', logRequest=0, logNamespace='', savedRows=[];
@@ -22,7 +22,7 @@
   loadLogs=async()=>{const id=++logRequest;archiveStatus.textContent='Loading logs…';allLogs='';render();try{
     if(source.value==='saved'){
       const requestedPod=savedPod.value;
-      const result=await api('/api/history?'+new URLSearchParams({namespace:logNamespace||ns(),kind:'logs',days:days.value,pod:requestedPod,container:container.value}));
+      const result=await api('/api/history?'+new URLSearchParams({namespace:logNamespace||ns(),kind:'logs',days:days.value,pod:requestedPod,container:container.value,application:dialog.dataset.application||''}));
       if(id!==logRequest)return;savedRows=result.items;const chosen=container.value;
       const pods=result.pods||[...new Set(savedRows.map(x=>x.pod))];if(requestedPod&&!pods.includes(requestedPod))pods.push(requestedPod);
       savedPod.innerHTML='<option value="">All saved Pods</option>'+pods.sort().map(p=>'<option value="'+esc(p)+'">'+esc(p)+'</option>').join('');savedPod.value=requestedPod;
@@ -35,8 +35,8 @@
   }catch(e){if(id===logRequest){allLogs=e.message;archiveStatus.textContent='Unable to load logs.';render()}}};
   source.onchange=()=>{mode();if(source.value==='current'){if(selectedPod)openLogs(selectedPod);else{allLogs='Select a live Pod from the Pods tab to load current logs.';archiveStatus.textContent='';render()}}else loadLogs()};
   container.onchange=loadLogs;since.onchange=loadLogs;days.onchange=()=>{container.value='';loadLogs()};savedPod.onchange=()=>{container.value='';loadLogs()};
-  window.addEventListener('show-saved-logs',e=>{++logRequest;selectedPod=e.detail?.pod||'';logNamespace=ns();source.value='saved';setSavedPod(selectedPod);search.value='';container.innerHTML='<option value="">All saved containers</option>';mode();$('#logTitle').textContent='Saved logs · '+logNamespace;if(!dialog.open)dialog.showModal();loadLogs()});
-  dialog.addEventListener('close',()=>{if(!dialog.open)++logRequest});
+  window.addEventListener('show-saved-logs',e=>{++logRequest;selectedPod=e.detail?.pod||'';dialog.dataset.application=e.detail?.application||'';logNamespace=ns();source.value='saved';setSavedPod(selectedPod);search.value='';container.innerHTML='<option value="">All saved containers</option>';mode();$('#logTitle').textContent=(dialog.dataset.application?'Application logs · '+dialog.dataset.application:'Saved logs')+' · '+logNamespace;if(!dialog.open)dialog.showModal();loadLogs()});
+  dialog.addEventListener('close',()=>{if(!dialog.open){++logRequest;dialog.dataset.application=''}});
   $('#downloadLogs').onclick=()=>{const stamp=new Date().toISOString().replace(/[:.]/g,'-'),safeName=((source.value==='saved'?savedPod.value:selectedPod)||'namespace').replace(/[^a-zA-Z0-9._-]/g,'_'),blob=new Blob([output.textContent],{type:'text/plain;charset=utf-8'}),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=safeName+'-'+source.value+'-'+stamp+'.log';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000)};
   $('#confirmRestart').addEventListener('click',()=>{setTimeout(loadNamespace,3000);setTimeout(loadNamespace,9000)});
   function metric(v,memory){const s=v.trim();if(s==='—'||s==='unavailable'||!s)return-1;const n=parseFloat(s),u=s.replace(/[0-9.]/g,'').toLowerCase();if(Number.isNaN(n))return-1;if(memory)return n*(u==='gi'?1024:u==='ki'?1/1024:1);return n*(u===''?1000:u==='m'?1:1000)}
