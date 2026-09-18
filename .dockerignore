@@ -2,3 +2,17 @@
 chart
 __pycache__
 README.md
+prod-values.yaml
+*-values.local.yaml
+*-values.private.yaml
+secrets*.yaml
+*.kubeconfig
+*.pem
+*.key
+*.crt
+.env
+users.json
+*.zip
+*.tgz
+*-preview.png
+CHANGELOG.md
